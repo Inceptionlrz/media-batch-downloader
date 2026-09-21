@@ -1,0 +1,29 @@
+# 复制为 config.toml 后按需修改
+
+[general]
+output_dir = "output"     # 下载根目录（--output 可覆盖）
+concurrency = 4           # 并发下载数
+retries = 3               # 单条失败重试次数
+timeout = 30              # 单次请求超时（秒）
+download_cover = false    # 是否额外保存封面
+
+[network]
+# 代理地址，访问 TikTok 时通常需要；留空则直连
+proxy = ""
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
+
+[quality]
+# yt-dlp 格式选择器：最高画质视频 + 最高音质音频，再回退到最佳单流
+video_format = "bv*+ba/b"
+merge_output = "mp4"      # 仅封装，不重编码
+min_height = 0            # 低于该高度视为不合格（0 表示不限制）
+
+[douyin]
+# 留空时自动尝试：浏览器 Cookie → 平台 fresh Cookie
+cookie = ""
+# ffmpeg 之外，抖音优先使用 f2 直连接口，失败则回退 yt-dlp
+engines = ["f2", "ytdlp"]
+
+[tiktok]
+cookie = ""
+engines = ["ytdlp", "f2"]

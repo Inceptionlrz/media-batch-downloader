@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>短视频批量下载器</title>
+<style>
+  :root{
+    --bg:#0d0f14; --panel:#161a22; --panel2:#1d222c; --line:#2a3140;
+    --text:#e6e9ef; --muted:#8b94a7; --accent:#5b8cff; --accent2:#7c5cff;
+    --ok:#37d399; --warn:#f5b13d; --err:#ff5f6d; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 60px}
+  header{display:flex;align-items:baseline;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+  h1{font-size:20px;margin:0;font-weight:650;letter-spacing:.3px}
+  .sub{color:var(--muted);font-size:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px;margin-bottom:16px}
+  .card h2{font-size:14px;margin:0 0 12px;font-weight:600;color:var(--text)}
+  textarea{width:100%;min-height:96px;background:var(--panel2);color:var(--text);
+    border:1px solid var(--line);border-radius:8px;padding:10px 12px;resize:vertical;
+    font-family:ui-monospace,Consolas,monospace;font-size:13px;outline:none}
+  textarea:focus{border-color:var(--accent)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  input,select{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-radius:8px;padding:7px 10px;font-size:13px;outline:none}
+  input:focus,select:focus{border-color:var(--accent)}
+  .row{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;align-items:center}
+  button{background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;transition:.15s}
+  button:hover{border-color:var(--accent);color:#fff}
+  button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));
+    border:none;color:#fff;font-weight:600}
+  button.primary:hover{filter:brightness(1.1)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .hint{color:var(--muted);font-size:12px;margin-top:8px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:500;font-size:12px}
+  td.name{word-break:break-all;max-width:380px}
+  .tag{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;
+    background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .tag.ok{color:var(--ok);border-color:rgba(55,211,153,.4)}
+  .tag.fail{color:var(--err);border-color:rgba(255,95,109,.4)}
+  .tag.run{color:var(--accent);border-color:rgba(91,140,255,.4)}
+  .bar{height:6px;background:var(--panel2);border-radius:999px;overflow:hidden;margin:10px 0}
+  .bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));
+    transition:width .3s}
+  .task{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;background:var(--panel2)}
+  .task-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+  .task-id{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--muted)}
+  .logs{background:#0b0d12;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+    max-height:180px;overflow:auto;font-family:ui-monospace,Consolas,monospace;font-size:11.5px;
+    margin-top:10px;white-space:pre-wrap;color:var(--muted)}
+  .logs .error{color:var(--err)}
+  .empty{color:var(--muted);font-size:13px;padding:8px 0}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .flexrow{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>短视频批量下载器</h1>
+    <span class="sub">TikTok / 抖音 · 原画质无水印</span>
+    <span class="sub" id="envInfo" style="margin-left:auto"></span>
+    <button id="btnDiag" style="padding:4px 12px">环境诊断</button>
+  </header>
+
+  <div class="card">
+    <h2>下载任务</h2>
+    <textarea id="urls" placeholder="每行一个链接，支持单作品与博主主页：&#10;https://www.tiktok.com/@tiktok/video/7106594312292453675&#10;https://www.tiktok.com/@tiktok"></textarea>
+    <div class="grid">
+      <div><label>条数上限（0=全部）</label><input id="limit" type="number" min="0" value="0"></div>
+      <div><label>并发数</label><input id="concurrency" type="number" min="1" value="4"></div>
+      <div><label>引擎</label><select id="engine">
+        <option value="">自动</option><option value="ytdlp">ytdlp</option><option value="f2">f2</option>
+      </select></div>
+      <div><label>代理（可选）</label><input id="proxy" placeholder="http://127.0.0.1:7897"></div>
+      <div><label>输出目录（可选）</label><input id="output" placeholder="留空用配置文件"></div>
+    </div>
+    <div class="row">
+      <button class="primary" id="btnStart">开始下载</button>
+      <button id="btnParse">解析预览</button>
+      <button id="btnFolder">打开输出目录</button>
+      <label style="display:flex;align-items:center;gap:6px;margin:0;color:var(--text);font-size:13px">
+        <input type="checkbox" id="browserCookie" style="width:auto"> 使用浏览器 Cookie
+      </label>
+      <span class="hint" id="cookieHint"></span>
+    </div>
+    <div class="hint">抖音需要 Cookie：在浏览器登录 douyin.com 后勾选上面选项，或执行 <code>python dl.py --export-cookie douyin</code></div>
+  </div>
+
+  <div class="card" id="parseCard" style="display:none">
+    <div class="flexrow"><h2 style="margin:0">解析预览</h2><span class="sub" id="parseCount"></span></div>
+    <div id="parseBody"></div>
+  </div>
+
+  <div class="card">
+    <div class="flexrow">
+      <h2 style="margin:0">任务</h2>
+      <button id="btnRefresh" style="padding:4px 12px">刷新</button>
+    </div>
+    <div id="tasks"><div class="empty">暂无任务</div></div>
+  </div>
+
+  <div class="card">
+    <div class="flexrow">
+      <h2 style="margin:0">已下载文件</h2>
+      <button id="btnFiles" style="padding:4px 12px">刷新列表</button>
+    </div>
+    <div id="files"><div class="empty">暂无文件</div></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const mb = n => (n/1048576).toFixed(1) + ' MB';
+
+async function api(path, opts){
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.detail || r.statusText);
+  return data;
+}
+
+function collect(){
+  return {
+    urls: $('urls').value.split('\n').map(s=>s.trim()).filter(Boolean),
+    limit: parseInt($('limit').value||'0',10),
+    concurrency: parseInt($('concurrency').value||'4',10),
+    engine: $('engine').value,
+    proxy: $('proxy').value.trim(),
+    output: $('output').value.trim(),
+    browser_cookie: $('browserCookie').checked
+  };
+}
+
+async function loadEnv(){
+  try{
+    const c = await api('/api/config');
+    $('envInfo').textContent = `输出目录 ${c.output_dir} · 并发 ${c.concurrency}`;
+    const tips = [];
+    tips.push(c.has_douyin_cookie ? '抖音 Cookie 已配置' : '抖音 Cookie 未配置');
+    $('cookieHint').textContent = tips.join(' · ');
+  }catch(e){ $('envInfo').textContent = '后端未连接'; }
+}
+
+let busy = false;
+function setBusy(v){
+  busy = v;
+  $('btnStart').disabled = v;
+  $('btnParse').disabled = v;
+}
+
+$('btnStart').onclick = async () => {
+  const body = collect();
+  if(!body.urls.length){ alert('请先粘贴至少一个链接'); return; }
+  setBusy(true);
+  try{
+    const r = await api('/api/tasks', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)});
+    await refreshTasks();
+    $('tasks').scrollIntoView({behavior:'smooth', block:'center'});
+  }catch(e){ alert('创建失败：'+e.message); }
+  finally{ setBusy(false); }
+};
+
+$('btnParse').onclick = async () => {
+  const body = collect();
+  if(!body.urls.length){ alert('请先粘贴至少一个链接'); return; }
+  setBusy(true);
+  $('parseBody').innerHTML = '<div class="empty">解析中…</div>';
+  $('parseCard').style.display = '';
+  try{
+    const r = await api('/api/parse', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)});
+    $('parseCount').textContent = `共 ${r.items.length} 个作品`;
+    if(!r.items.length){ $('parseBody').innerHTML = '<div class="empty">未解析到作品</div>'; return; }
+    $('parseBody').innerHTML = '<table><thead><tr><th>平台</th><th>作品 ID</th><th>类型</th><th>画质</th><th>作者</th><th>说明</th><th>引擎</th></tr></thead><tbody>'
+      + r.items.map(i=>`<tr><td>${esc(i.platform)}</td><td>${esc(i.id)}</td><td>${esc(i.type)}</td>
+        <td>${esc(i.quality)}</td><td>${esc(i.author)}</td><td class="name">${esc(i.desc)}</td>
+        <td>${esc(i.engine)}</td></tr>`).join('') + '</tbody></table>';
+  }catch(e){
+    $('parseBody').innerHTML = `<div class="empty" style="color:var(--err)">解析失败：${esc(e.message)}</div>`;
+  }finally{ setBusy(false); }
+};
+
+$('btnDiag').onclick = async () => {
+  const b = $('btnDiag'); b.disabled = true; b.textContent = '检测中…';
+  try{
+    const d = await api('/api/diag');
+    const p = d.probe || {};
+    const fmt = k => p[k] ? (p[k].ok ? `${k} 可达 (${p[k].ms}ms)` : `${k} 不可达：${p[k].error}`) : '';
+    alert('引擎：' + (d.engines||[]).join(', ') + '\n'
+        + 'ffmpeg：' + (d.ffmpeg ? '已安装' : '缺失（多轨合并时会失败）') + '\n'
+        + '代理：' + (d.proxy || '未配置') + '\n'
+        + fmt('tiktok') + '\n' + fmt('douyin'));
+  }catch(e){ alert('诊断失败：'+e.message); }
+  finally{ b.disabled = false; b.textContent = '环境诊断'; }
+};
+
+$('btnFolder').onclick = async () => {
+  try{ await api('/api/open-folder', {method:'POST'}); }
+  catch(e){ alert('打开失败：'+e.message); }
+};
+
+$('btnRefresh').onclick = refreshTasks;
+$('btnFiles').onclick = loadFiles;
+
+function taskHtml(t){
+  const s = t.stats || {};
+  const pct = s.todo ? Math.round((s.done||0)/s.todo*100) : (t.status==='done'?100:0);
+  const statusTag = {queued:'排队中',running:'下载中',done:'已完成',error:'异常',cancelled:'已取消'}[t.status] || t.status;
+  const cls = t.status==='done'?'ok':(t.status==='error'?'fail':(t.status==='running'?'run':''));
+  const logs = (t.logs||[]).slice(-60).map(l=>`<div class="${l.level==='error'?'error':''}">[${l.t}] ${esc(l.msg)}</div>`).join('');
+  const okItems = (t.items||[]).filter(i=>i.status==='ok');
+  const rows = (t.items||[]).slice(-50).map(i=>
+    `<tr><td><span class="tag ${i.status==='ok'?'ok':'fail'}">${i.status==='ok'?'成功':'失败'}</span></td>
+     <td>${esc(i.id)}</td><td>${esc(i.quality)}</td><td class="name">${esc(i.file||i.error)}</td>
+     <td>${esc(i.engine||'')}</td></tr>`).join('');
+  return `<div class="task">
+    <div class="task-head">
+      <div><span class="tag ${cls}">${statusTag}</span>
+        <span class="task-id"> #${t.id}</span>
+        <span class="sub"> · ${t.urls.length} 个链接</span></div>
+      <div class="sub">成功 ${s.ok||0} · 失败 ${s.fail||0} · 跳过 ${s.skipped||0} · 待下载 ${s.todo||0}</div>
+    </div>
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    ${rows ? `<table><thead><tr><th style="width:60px">状态</th><th>作品 ID</th><th style="width:90px">画质</th><th>文件 / 错误</th><th style="width:60px">引擎</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
+    <div class="logs">${logs || '（无日志）'}</div>
+  </div>`;
+}
+
+async function refreshTasks(){
+  try{
+    const list = await api('/api/tasks');
+    $('tasks').innerHTML = list.length
+      ? list.map(taskHtml).join('')
+      : '<div class="empty">暂无任务</div>';
+    if(list.some(t=>t.status==='running'||t.status==='queued')) setTimeout(refreshTasks, 1500);
+    if(list.length) loadFiles();
+  }catch(e){ /* 后端未就绪时静默 */ }
+}
+
+async function loadFiles(){
+  try{
+    const r = await api('/api/files');
+    if(!r.files.length){ $('files').innerHTML = '<div class="empty">暂无文件</div>'; return; }
+    $('files').innerHTML = `<div class="sub" style="margin-bottom:6px">${r.files.length} 个文件 · ${esc(r.root)}</div>
+      <table><thead><tr><th>文件</th><th style="width:90px">大小</th><th style="width:150px">时间</th><th style="width:70px"></th></tr></thead><tbody>`
+      + r.files.slice().reverse().map(f=>{
+        const d = new Date(f.mtime*1000).toLocaleString('zh-CN',{hour12:false});
+        return `<tr><td class="name">${esc(f.path)}</td><td>${mb(f.size)}</td><td>${esc(d)}</td>
+          <td><a href="/files/${encodeURI(f.path)}" download>下载</a></td></tr>`;
+      }).join('') + '</tbody></table>';
+  }catch(e){ /* ignore */ }
+}
+
+loadEnv();
+refreshTasks();
+loadFiles();
+setInterval(()=>{ if(!busy) refreshTasks(); }, 5000);
+</script>
+</body>
+</html>

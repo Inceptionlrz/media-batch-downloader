@@ -1,0 +1,19 @@
+# 下载产物
+output/
+logs/
+*.log
+
+# 含 Cookie 等敏感配置
+config.toml
+cookies.txt
+
+# 本地项目数据
+.workbuddy/
+.wbapp_*.genie
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/

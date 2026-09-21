@@ -1,6 +1,9 @@
 # 短视频批量下载器（TikTok / 抖音）
 
-通过链接批量下载 TikTok、抖音等平台内容的命令行工具，**输出平台原画质、无水印**的媒体文件。
+通过链接批量下载 TikTok、抖音等平台内容的命令行 + Web 工具，**输出平台原画质、无水印**的媒体文件。
+
+- 代码仓库：https://github.com/Inceptionlrz/media-batch-downloader
+- 在线部署：https://media-batch-dl.app.workbuddy.host/
 
 ## 技术选型（二次开发基座）
 
@@ -46,6 +49,17 @@ python web.py --host 0.0.0.0 --port 9000
 前端每 1.5 秒轮询一次运行中任务，无需手动刷新。任务记录保存在内存，重启服务后清空（已下载索引仍持久化在 `output/.dl_index.json`）。
 
 > 依赖冲突提示：`f2` 要求 `websockets<13`，安装 `uvicorn[standard]` 会把它升到 17 导致 f2 导入失败。requirements.txt 已固定 `websockets==12.0`，若已误升级请执行 `pip install "websockets==12.0"`。
+
+### 云端沙箱的网络边界（实测）
+
+部署环境位于国内，`/api/diag` 实测结果：
+
+| 目标 | 云端沙箱 | 本机（走代理） |
+|---|---|---|
+| TikTok | ❌ 不可达（TLS 连接被关闭） | ✅ 可达 |
+| 抖音 | ✅ 可达（约 90ms） | ✅ 可达 |
+
+因此：**云端部署的界面适合下抖音（需配置 Cookie），下 TikTok 请用本地运行**（`python web.py` 或 CLI）。页面上的「环境诊断」按钮会实时显示当前环境的连通性。
 
 ## 使用（命令行）
 

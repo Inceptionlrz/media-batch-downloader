@@ -1,0 +1,195 @@
+name: 批量下载
+
+# GitHub-hosted runner 位于境外数据中心，出网不受国内沙箱限制，
+# TikTok / Instagram / X 等站点均可直连。
+# 用法：仓库 → Actions → 「批量下载」→ Run workflow → 填链接。
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "链接列表：每行一个，支持作品链接 / 博主主页链接 / 短链"
+        required: true
+        type: string
+      limit:
+        description: "每个主页最多下载条数（0 = 全部）"
+        required: false
+        default: "20"
+        type: string
+      concurrency:
+        description: "并发下载数"
+        required: false
+        default: "4"
+        type: string
+      engine:
+        description: "强制指定引擎（留空 = 按配置自动回退）"
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - ytdlp
+          - f2
+      delivery:
+        description: "产物投递方式"
+        required: false
+        default: "both"
+        type: choice
+        options:
+          - both      # Artifact + Release（推荐，Release 是公开直链）
+          - artifact  # 仅 Actions Artifact（需登录 GitHub 下载）
+          - release   # 仅 GitHub Release（公开直链，可直接分享）
+      retention:
+        description: "Artifact 保留天数"
+        required: false
+        default: "7"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: batch-download
+  cancel-in-progress: false
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 准备 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 检查 ffmpeg
+        run: |
+          if command -v ffmpeg >/dev/null 2>&1; then
+            ffmpeg -version | head -n 1
+          else
+            sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+            ffmpeg -version | head -n 1
+          fi
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 写入链接文件
+        env:
+          URLS: ${{ inputs.urls }}
+        run: |
+          printf '%s\n' "$URLS" | sed 's/\r$//' > links.txt
+          echo "---- 待处理链接 ----"
+          cat -n links.txt
+
+      - name: 执行下载
+        id: dl
+        env:
+          DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
+          TIKTOK_COOKIE: ${{ secrets.TIKTOK_COOKIE }}
+          URLS: ${{ inputs.urls }}
+          LIMIT: ${{ inputs.limit }}
+          CONCURRENCY: ${{ inputs.concurrency }}
+          ENGINE: ${{ inputs.engine }}
+        run: |
+          mkdir -p output
+          args=(-f links.txt -o output -n "$LIMIT" -j "$CONCURRENCY")
+          [ -n "$ENGINE" ] && args+=(--engine "$ENGINE")
+          set +e
+          python dl.py "${args[@]}" 2>&1 | tee dl.log
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "::notice::dl.py 退出码 $code（0=成功 / 3=有失败项 / 其它=异常）"
+
+      - name: 生成清单与运行摘要
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          out = Path("output")
+          files = sorted(p for p in out.rglob("*")
+                         if p.is_file() and p.name != ".dl_index.json")
+          total = sum(p.stat().st_size for p in files)
+
+          L = ["## 下载结果", ""]
+          L.append(f"- 文件数：**{len(files)}**")
+          L.append(f"- 总大小：**{total / 1024 / 1024:.1f} MB**")
+          L.append(f"- 引擎日志：见 Job 日志「执行下载」步骤")
+          L.append("")
+          if files:
+              L.append("| 文件 | 大小 |")
+              L.append("| --- | --- |")
+              for p in files[:60]:
+                  L.append(f"| `{p.relative_to(out).as_posix()}` "
+                           f"| {p.stat().st_size / 1024 / 1024:.2f} MB |")
+              if len(files) > 60:
+                  L.append(f"| … 其余 {len(files) - 60} 个文件 | |")
+          else:
+              L.append("> 本次没有产出任何文件，请查看「执行下载」步骤日志定位原因。")
+              L.append("")
+              L.append("常见原因：链接类型不被识别 / 平台风控需要 Cookie / 主页为私密账号。")
+
+          text = "\n".join(L)
+          Path("manifest.md").write_text(text, encoding="utf-8")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write(text + "\n")
+          print(text)
+          PY
+
+      - name: 打包产物
+        run: |
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+
+          out = Path("output")
+          files = sorted(p for p in out.rglob("*")
+                         if p.is_file() and p.name != ".dl_index.json")
+          if not files:
+              print("无文件可打包")
+              raise SystemExit(0)
+          with zipfile.ZipFile("media-batch.zip", "w", zipfile.ZIP_STORED) as z:
+              for p in files:
+                  z.write(p, p.relative_to(out).as_posix())
+          print(f"打包 {len(files)} 个文件 → media-batch.zip")
+          PY
+
+      - name: 上传 Artifact
+        if: ${{ inputs.delivery != 'release' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-${{ github.run_number }}
+          path: media-batch.zip
+          retention-days: ${{ fromJSON(inputs.retention) }}
+          if-no-files-found: warn
+
+      - name: 发布 Release（公开直链）
+        if: ${{ inputs.delivery != 'artifact' && hashFiles('media-batch.zip') != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: batch-${{ github.run_number }}
+          name: "批量下载 #${{ github.run_number }}"
+          body_path: manifest.md
+          files: media-batch.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 直链提示
+        if: ${{ inputs.delivery != 'artifact' && hashFiles('media-batch.zip') != '' }}
+        env:
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.run_number }}
+        run: |
+          echo "### 下载直链" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://github.com/$REPO/releases/download/batch-$RUN/media-batch.zip" \
+               >> "$GITHUB_STEP_SUMMARY"

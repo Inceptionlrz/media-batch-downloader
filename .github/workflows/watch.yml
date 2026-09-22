@@ -1,0 +1,175 @@
+name: 博主更新监控
+
+# 定时盯博主主页：只下载上次之后新发的作品（靠 .dl_index.json 去重）。
+# 索引通过 Actions Cache 跨运行持久化，因此无需仓库里存文件。
+# 注意：GitHub schedule 为尽力而为，通常会有 5~30 分钟延迟，不适合准实时场景。
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "要监控的博主主页链接（每行一个）；留空则用仓库变量 WATCH_URLS"
+        required: false
+        default: ""
+        type: string
+      limit:
+        description: "每个主页最多拉取条数"
+        required: false
+        default: "10"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 准备 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 恢复去重索引
+        uses: actions/cache/restore@v4
+        with:
+          path: output/.dl_index.json
+          key: dl-index-v1
+          restore-keys: dl-index-v1
+
+      - name: 快照运行前索引
+        run: |
+          mkdir -p output
+          if [ -f output/.dl_index.json ]; then
+            cp output/.dl_index.json index.before.json
+            echo "已恢复历史索引：$(python -c 'import json;print(len(json.load(open("index.before.json"))))') 条"
+          else
+            echo '{}' > index.before.json
+            echo "首次运行，无历史索引"
+          fi
+
+      - name: 增量下载
+        env:
+          DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
+          TIKTOK_COOKIE: ${{ secrets.TIKTOK_COOKIE }}
+          INLINE_URLS: ${{ inputs.urls }}
+          REPO_URLS: ${{ vars.WATCH_URLS }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          printf '%s\n%s\n' "$INLINE_URLS" "$REPO_URLS" \
+            | sed 's/\r$//' | grep -v '^\s*$' | sort -u > links.txt
+          echo "---- 监控目标 ----"
+          cat -n links.txt
+          if [ ! -s links.txt ]; then
+            echo "没有配置任何监控链接，退出"
+            exit 1
+          fi
+          set +e
+          python dl.py -f links.txt -o output -n "$LIMIT" -j 3 2>&1 | tee dl.log
+          echo "dl.py 退出码 ${PIPESTATUS[0]}"
+          set -e
+
+      - name: 计算新增条目
+        id: diff
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          def load(p):
+              f = Path(p)
+              if not f.exists():
+                  return {}
+              try:
+                  return json.loads(f.read_text(encoding="utf-8"))
+              except Exception:
+                  return {}
+
+          before = load("index.before.json")
+          after = load("output/.dl_index.json")
+          new_keys = [k for k in after if k not in before]
+
+          out = Path("output")
+          picked = []
+          for k in new_keys:
+              for f in after[k].get("files", []):
+                  p = out / Path(f).name
+                  if p.is_file():
+                      picked.append(p)
+          # 兜底：某些平台文件在子目录，按 basename 全局找一次
+          if len(picked) < len(new_keys):
+              have = {p.name for p in picked}
+              for p in out.rglob("*"):
+                  if p.is_file() and p.name != ".dl_index.json" and p.name not in have:
+                      picked.append(p)
+                      have.add(p.name)
+
+          with open("new_files.txt", "w", encoding="utf-8") as fh:
+              for p in picked:
+                  fh.write(p.as_posix() + "\n")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"new_count={len(new_keys)}\n")
+              fh.write(f"file_count={len(picked)}\n")
+
+          lines = ["## 监控结果", ""]
+          lines.append(f"- 历史已收录：{len(before)} 条")
+          lines.append(f"- 本次新增：**{len(new_keys)}** 条 / {len(picked)} 个文件")
+          lines.append("")
+          for p in picked[:40]:
+              lines.append(f"- `{p.relative_to(out).as_posix()}` "
+                           f"（{p.stat().st_size / 1024 / 1024:.2f} MB）")
+          if not picked:
+              lines.append("> 没有新作品，本次不产出任何文件。")
+          Path("manifest.md").write_text("\n".join(lines), encoding="utf-8")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          PY
+
+      - name: 保存去重索引
+        if: ${{ always() }}
+        uses: actions/cache/save@v4
+        with:
+          path: output/.dl_index.json
+          key: dl-index-v1-${{ github.run_id }}
+
+      - name: 打包新增文件
+        if: ${{ steps.diff.outputs.file_count != '0' }}
+        run: |
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+
+          out = Path("output")
+          names = [l.strip() for l in
+                   Path("new_files.txt").read_text(encoding="utf-8").splitlines() if l.strip()]
+          with zipfile.ZipFile("media-new.zip", "w", zipfile.ZIP_STORED) as z:
+              for n in names:
+                  p = Path(n)
+                  if p.is_file():
+                      z.write(p, p.relative_to(out).as_posix())
+          print(f"打包 {len(names)} 个新文件 → media-new.zip")
+          PY
+
+      - name: 上传新增文件
+        if: ${{ steps.diff.outputs.file_count != '0' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: new-${{ github.run_number }}
+          path: media-new.zip
+          retention-days: 30
+          if-no-files-found: warn

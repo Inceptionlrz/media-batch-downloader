@@ -66,6 +66,67 @@ python web.py --host 0.0.0.0 --port 9000
 1. 打开页面即诊断，TikTok / 抖音不可达时顶部显示黄色警告条；
 2. 任务启动前预检目标站点，不可达时 **8 秒内**直接失败并提示原因（此前需等引擎超时约 80 秒）。
 
+## GitHub Actions 批量下载（TikTok 的首选方案）
+
+GitHub-hosted runner 位于境外数据中心，**出网不受国内沙箱限制，TikTok 可直接下载**。
+Action 是批处理形态（无常驻 Web 界面），触发入口就是 GitHub 的 Actions 页面。
+
+### 工作流一：`批量下载`（手动触发）
+
+仓库 → **Actions** → 选「批量下载」→ **Run workflow**，填写：
+
+| 输入 | 说明 | 默认 |
+|---|---|---|
+| `urls` | 链接列表，每行一个（作品链接 / 主页链接 / 短链均可） | 必填 |
+| `limit` | 每个主页最多下载条数，`0` = 全部 | `20` |
+| `concurrency` | 并发数 | `4` |
+| `engine` | 强制引擎，留空按配置自动回退 | 空 |
+| `delivery` | `both` / `artifact` / `release` | `both` |
+| `retention` | Artifact 保留天数 | `7` |
+
+运行结束后：
+
+- **Artifact**：Actions 页面直接下载（需登录 GitHub）
+- **Release**：`batch-<运行号>` tag，附带 `media-batch.zip` 与文件清单，**匿名可下载的公开直链**
+  `https://github.com/<owner>/<repo>/releases/download/batch-<N>/media-batch.zip`
+- **Job Summary**：Actions 运行页显示本次文件数与逐条清单
+
+### 工作流二：`博主更新监控`（定时增量）
+
+每 6 小时跑一次，只下载上次之后的新作品。去重索引 `.dl_index.json` 通过 Actions Cache
+持久化，无需入库。有新增才产 Artifact（保留 30 天），无新增则空跑。
+
+监控目标来源（二选一，都会读）：
+
+1. 手动 Run workflow 时填 `urls`；
+2. 仓库 **Settings → Secrets and variables → Actions → Variables** 新建 `WATCH_URLS`，每行一个主页链接。
+
+> GitHub `schedule` 是尽力而为，通常延迟 5~30 分钟，不适合准实时场景。
+
+### 配置 Cookie（抖音必需）
+
+Actions 环境没有浏览器，只能走 Secrets：
+
+**Settings → Secrets and variables → Actions → New repository secret**
+
+| Secret | 用途 |
+|---|---|
+| `DOUYIN_COOKIE` | 抖音登录 Cookie（抖音接口风控严格，无 Cookie 常返回验证页） |
+| `TIKTOK_COOKIE` | TikTok Cookie（通常可留空，实测未登录即可下载） |
+
+代码已支持 `DOUYIN_COOKIE` / `TIKTOK_COOKIE` 环境变量，无需改文件。取 Cookie：
+浏览器登录抖音 → F12 → Network → 任选请求 → 复制 `Cookie` 请求头整串。
+
+### 配额与限制
+
+| 项 | 免费额度 |
+|---|---|
+| 私有仓库 | 2000 分钟/月，Artifact 存储 500MB |
+| 公开仓库 | 无限分钟数，Artifact 存储无限 |
+| 单次 Job | 最长 6 小时（本工作流设 330 分钟） |
+
+大批量下载建议：仓库设为公开，或改用 Release 直链 + 缩短 `retention`。
+
 ## 使用（命令行）
 
 ```bash
@@ -136,6 +197,10 @@ output/
 
 ```
 dl.py                     CLI 入口
+web.py                    Web 界面（FastAPI）
+.github/workflows/
+  batch-download.yml      手动触发的批量下载流水线
+  watch.yml               定时监控博主更新（增量）
 src/
   config.py               配置加载（config.toml）
   cookies.py              Cookie 多策略获取
@@ -155,6 +220,7 @@ config.example.toml       配置模板
 - 抖音 Web 接口风控升级频繁，`fetch_one_video` 偶发失败；已实现 f2 → yt-dlp 自动回退，仍失败时建议配置真实 Cookie。
 - 已下载作品记录在 `output/.dl_index.json`，重复执行自动跳过；删除该文件可强制重下。
 - 仅支持公开可见内容；私密/登录可见内容不在能力范围内。
+- GitHub Actions 为批处理形态，不能承载常驻 Web 界面；Web 界面请用本地 `python web.py` 或云端部署。
 
 ## 免责声明
 

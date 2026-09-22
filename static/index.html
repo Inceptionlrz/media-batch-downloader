@@ -72,6 +72,9 @@
     <button id="btnDiag" style="padding:4px 12px">环境诊断</button>
   </header>
 
+  <div id="envBanner" style="display:none;background:rgba(245,177,61,.12);border:1px solid rgba(245,177,61,.45);
+       color:var(--warn);border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:13px"></div>
+
   <div class="card">
     <h2>下载任务</h2>
     <textarea id="urls" placeholder="每行一个链接，支持单作品与博主主页：&#10;https://www.tiktok.com/@tiktok/video/7106594312292453675&#10;https://www.tiktok.com/@tiktok"></textarea>
@@ -149,6 +152,18 @@ async function loadEnv(){
     const tips = [];
     tips.push(c.has_douyin_cookie ? '抖音 Cookie 已配置' : '抖音 Cookie 未配置');
     $('cookieHint').textContent = tips.join(' · ');
+    // 环境警告：目标站点不可达时提前告知，避免提交后盲等
+    try{
+      const d = await api('/api/diag');
+      const msgs = [];
+      const p = d.probe || {};
+      if(p.tiktok && !p.tiktok.ok)
+        msgs.push('当前部署环境无法访问 TikTok（网络被限制），TikTok 任务会失败。请在本机运行 python dl.py 或 python web.py 下载 TikTok。');
+      if(p.douyin && !p.douyin.ok)
+        msgs.push('当前环境无法访问抖音，请检查网络或在页面配置代理。');
+      const banner = $('envBanner');
+      if(msgs.length){ banner.textContent = msgs.join(' '); banner.style.display = ''; }
+    }catch(e){ /* 诊断失败不阻塞 */ }
   }catch(e){ $('envInfo').textContent = '后端未连接'; }
 }
 

@@ -100,6 +100,42 @@ class Orchestrator:
                 picked.append(eng)
         return picked
 
+    # ---------- network probe ----------
+    _PROBE_TTL = 300  # 连通性缓存 5 分钟，避免每次失败都重复探测
+
+    def _probe_ok(self, platform: str) -> bool | None:
+        """探测平台可达性；无法判断返回 None。"""
+        import httpx
+
+        targets = {"tiktok": "https://www.tiktok.com/", "douyin": "https://www.douyin.com/"}
+        target = targets.get(platform)
+        if not target:
+            return None
+        cache = getattr(self, "_probe_cache", None)
+        if cache is None:
+            cache = self._probe_cache = {}
+        hit = cache.get(platform)
+        now = time.time()
+        if hit and now - hit[0] < self._PROBE_TTL:
+            return hit[1]
+        ok = False
+        try:
+            httpx.get(target, headers={"User-Agent": self.cfg.user_agent},
+                      proxy=self.cfg.proxy or None, timeout=8, follow_redirects=True)
+            ok = True
+        except Exception:
+            ok = False
+        cache[platform] = (now, ok)
+        return ok
+
+    def _net_hint(self, platform: str) -> str:
+        if self._probe_ok(platform) is False:
+            if platform == "tiktok":
+                return ("（当前部署环境无法访问 tiktok.com —— 云端沙箱仅支持抖音；"
+                        "下载 TikTok 请在本机运行 python dl.py \"链接\" 或 python web.py）")
+            return f"（当前环境无法访问 {platform} 站点，请检查网络或在 config.toml 配置代理）"
+        return ""
+
     # ---------- collect ----------
     def collect(self, url: str, limit: int = 0) -> list[MediaItem]:
         final, platform, kind = classify(url, self.cfg)
@@ -123,7 +159,7 @@ class Orchestrator:
                 errors.append(f"{eng.name}: 未取到媒体直链")
             except Exception as exc:
                 errors.append(f"{eng.name}: {type(exc).__name__} {exc}")
-        raise RuntimeError("所有引擎均失败 → " + " | ".join(errors))
+        raise RuntimeError("所有引擎均失败 → " + " | ".join(errors) + self._net_hint(platform))
 
     def _collect_profile(self, url: str, platform: str, limit: int) -> list[MediaItem]:
         errors = []
@@ -135,7 +171,7 @@ class Orchestrator:
                 errors.append(f"{eng.name}: 主页未解析到作品")
             except Exception as exc:
                 errors.append(f"{eng.name}: {type(exc).__name__} {exc}")
-        raise RuntimeError("主页解析失败 → " + " | ".join(errors))
+        raise RuntimeError("主页解析失败 → " + " | ".join(errors) + self._net_hint(platform))
 
     # ---------- paths ----------
     def dest_dir(self, item: MediaItem) -> Path:

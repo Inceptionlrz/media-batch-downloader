@@ -29,6 +29,7 @@ from src.cookies import _from_browser, ensure_cookies, export_cookie_to_config  
 from src.engines.f2_engine import F2Engine  # noqa: E402
 from src.engines.ytdlp_engine import YtdlpEngine  # noqa: E402
 from src.orchestrator import Orchestrator  # noqa: E402
+from src.router import classify  # noqa: E402
 
 STATIC = ROOT / "static"
 MAX_LOGS = 500
@@ -142,6 +143,20 @@ def run_task(task: Task) -> None:
 
         orch = Orchestrator(cfg, engines, verbose=False, on_event=on_event)
         task.add_log(f"输出目录：{orch.out}")
+
+        # 预检：目标站点不可达时立即失败，避免引擎超时后用户才知道原因
+        blocked = []
+        for plat in {classify(u, cfg)[1] for u in task.req.urls}:
+            if orch.probe_ok(plat) is False:
+                blocked.append(plat)
+        if blocked:
+            names = "、".join(blocked)
+            raise RuntimeError(
+                f"当前环境无法访问 {names}：出网被限制。"
+                f"云端部署的沙箱仅能访问抖音；下载 TikTok 请在本机运行 "
+                f"python dl.py \"链接\" 或 python web.py 后访问本机地址。"
+            )
+
         results = orch.run(task.req.urls, task.req.limit, task.req.concurrency)
         ok = sum(1 for r in results if r.ok)
         task.add_log(f"任务结束：成功 {ok} / 失败 {len(results) - ok}")

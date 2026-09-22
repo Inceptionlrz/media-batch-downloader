@@ -103,7 +103,7 @@ class Orchestrator:
     # ---------- network probe ----------
     _PROBE_TTL = 300  # 连通性缓存 5 分钟，避免每次失败都重复探测
 
-    def _probe_ok(self, platform: str) -> bool | None:
+    def probe_ok(self, platform: str) -> bool | None:
         """探测平台可达性；无法判断返回 None。"""
         import httpx
 
@@ -129,7 +129,7 @@ class Orchestrator:
         return ok
 
     def _net_hint(self, platform: str) -> str:
-        if self._probe_ok(platform) is False:
+        if self.probe_ok(platform) is False:
             if platform == "tiktok":
                 return ("（当前部署环境无法访问 tiktok.com —— 云端沙箱仅支持抖音；"
                         "下载 TikTok 请在本机运行 python dl.py \"链接\" 或 python web.py）")

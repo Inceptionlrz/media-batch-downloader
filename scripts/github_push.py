@@ -40,11 +40,18 @@ def request(method: str, path: str, body: dict | None = None) -> dict:
             "Content-Type": "application/json",
         },
     )
-    try:
-        raw = urllib.request.urlopen(req, timeout=60).read()
-        return json.loads(raw) if raw else {}
-    except urllib.error.HTTPError as exc:
-        return {"__error": exc.code, "__msg": exc.read().decode("utf-8", "ignore")[:400]}
+    last = ""
+    for proxy in (None, "http://127.0.0.1:7897"):  # 直连被掐 TLS 时回退到 Clash
+        try:
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({"http": proxy, "https": proxy} if proxy else {}))
+            raw = opener.open(req, timeout=90).read()
+            return json.loads(raw) if raw else {}
+        except urllib.error.HTTPError as exc:
+            return {"__error": exc.code, "__msg": exc.read().decode("utf-8", "ignore")[:400]}
+        except Exception as exc:
+            last = f"{type(exc).__name__}: {exc}"
+    return {"__error": 0, "__msg": f"网络不可达（已试直连与代理）：{last}"}
 
 
 def collect_files() -> list[tuple[str, bytes]]:

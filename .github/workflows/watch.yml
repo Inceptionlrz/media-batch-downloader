@@ -62,6 +62,7 @@ jobs:
           fi
 
       - name: 增量下载
+        id: prep
         env:
           DOUYIN_COOKIE: ${{ secrets.DOUYIN_COOKIE }}
           TIKTOK_COOKIE: ${{ secrets.TIKTOK_COOKIE }}
@@ -69,21 +70,43 @@ jobs:
           REPO_URLS: ${{ vars.WATCH_URLS }}
           LIMIT: ${{ inputs.limit }}
         run: |
-          printf '%s\n%s\n' "$INLINE_URLS" "$REPO_URLS" \
-            | sed 's/\r$//' | grep -v '^\s*$' | sort -u > links.txt
+          # 注意：GitHub 默认 bash -eo pipefail，grep 无匹配返回 1 会直接终止 step，
+          # 因此过滤空行一律用 awk（始终返回 0），绝不依赖 grep 的退出码。
+          {
+            printf '%s\n' "$INLINE_URLS"
+            printf '%s\n' "$REPO_URLS"
+          } | sed 's/\r$//' | awk 'NF {print}' | sort -u > links.txt
+
+          if [ ! -s links.txt ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::没有配置任何监控链接，本次跳过（这不算是故障）"
+            {
+              echo "## 监控结果"
+              echo ""
+              echo "本次没有运行：未配置监控链接。"
+              echo ""
+              echo "配置方式（二选一）："
+              echo ""
+              echo "1. 手动 Run workflow 时在 urls 输入框填写主页链接；"
+              echo "2. 仓库 Settings → Secrets and variables → Actions → Variables"
+              echo "   新建 WATCH_URLS，每行一个主页链接。"
+              echo ""
+              echo "配置完成后本工作流会自动开始增量下载。"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
           echo "---- 监控目标 ----"
           cat -n links.txt
-          if [ ! -s links.txt ]; then
-            echo "没有配置任何监控链接，退出"
-            exit 1
-          fi
           set +e
           python dl.py -f links.txt -o output -n "$LIMIT" -j 3 2>&1 | tee dl.log
-          echo "dl.py 退出码 ${PIPESTATUS[0]}"
+          echo "dl.py 退出码 ${PIPESTATUS[0]}（0=全部成功 / 3=有失败项）"
           set -e
 
       - name: 计算新增条目
         id: diff
+        if: ${{ steps.prep.outputs.skip != 'true' }}
         run: |
           python - <<'PY'
           import json, os
@@ -141,14 +164,14 @@ jobs:
           PY
 
       - name: 保存去重索引
-        if: ${{ always() }}
+        if: ${{ always() && steps.prep.outputs.skip != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: output/.dl_index.json
           key: dl-index-v1-${{ github.run_id }}
 
       - name: 打包新增文件
-        if: ${{ steps.diff.outputs.file_count != '0' }}
+        if: ${{ steps.prep.outputs.skip != 'true' && steps.diff.outputs.file_count != '0' }}
         run: |
           python - <<'PY'
           import zipfile
@@ -166,7 +189,7 @@ jobs:
           PY
 
       - name: 上传新增文件
-        if: ${{ steps.diff.outputs.file_count != '0' }}
+        if: ${{ steps.prep.outputs.skip != 'true' && steps.diff.outputs.file_count != '0' }}
         uses: actions/upload-artifact@v4
         with:
           name: new-${{ github.run_number }}

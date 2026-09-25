@@ -82,12 +82,19 @@ jobs:
           pip install -r requirements.txt
 
       - name: 写入链接文件
+        id: prep
         env:
           URLS: ${{ inputs.urls }}
         run: |
-          printf '%s\n' "$URLS" | sed 's/\r$//' > links.txt
+          # awk 而非 grep：grep 无匹配返回 1，在 GitHub 默认 `bash -eo pipefail` 下会直接终止 step
+          printf '%s\n' "$URLS" | sed 's/\r$//' | awk 'NF {print}' > links.txt
           echo "---- 待处理链接 ----"
           cat -n links.txt
+          if [ ! -s links.txt ]; then
+            echo "::error::urls 输入为空，请至少填写一个链接"
+            exit 1
+          fi
+          echo "count=$(wc -l < links.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
 
       - name: 执行下载
         id: dl

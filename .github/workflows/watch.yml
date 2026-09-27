@@ -151,15 +151,14 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               fh.write(f"new_count={len(new_keys)}\n")
               fh.write(f"file_count={len(picked)}\n")
-
-          # 探测是否配置了通知渠道（缺配置则 notify=none，后续通知步自动跳过）
-          if os.environ.get("TG_BOT_TOKEN") and os.environ.get("TG_CHAT_ID"):
-              notify = "telegram"
-          elif os.environ.get("NOTIFY_WEBHOOK"):
-              notify = "webhook"
-          else:
-              notify = "none"
-          fh.write(f"notify={notify}\n")
+              # 探测是否配置了通知渠道（缺配置则 notify=none，后续通知步自动跳过）
+              if os.environ.get("TG_BOT_TOKEN") and os.environ.get("TG_CHAT_ID"):
+                  notify = "telegram"
+              elif os.environ.get("NOTIFY_WEBHOOK"):
+                  notify = "webhook"
+              else:
+                  notify = "none"
+              fh.write(f"notify={notify}\n")
 
           lines = ["## 监控结果", ""]
           lines.append(f"- 历史已收录：{len(before)} 条")

@@ -117,6 +117,32 @@ Actions 环境没有浏览器，只能走 Secrets：
 代码已支持 `DOUYIN_COOKIE` / `TIKTOK_COOKIE` 环境变量，无需改文件。取 Cookie：
 浏览器登录抖音 → F12 → Network → 任选请求 → 复制 `Cookie` 请求头整串。
 
+### 感知通知（博主有更新时主动提醒）
+
+监控工作流默认**安静运行**：有新增才发公开直链 + 主动通知，无新增则什么都不做（不刷通知、不发失败邮件）。
+
+有新增时，会先发一个 **GitHub Release**（`watch-<运行号>`，公开直链、**不过期**），
+再按下列 Secret 是否存在发送提醒（缺配置则自动跳过，绝不影响主流程）：
+
+| Secret | 触发渠道 | 获取方式 |
+|---|---|---|
+| `TG_BOT_TOKEN` + `TG_CHAT_ID` | **Telegram 机器人**私聊 | `@BotFather` 建 bot 拿 token；给 bot 发一条消息后访问 `https://api.telegram.org/bot<TOKEN>/getUpdates` 取 `chat.id` |
+| `NOTIFY_WEBHOOK` | **企业微信 / 飞书**群机器人 webhook | 群设置里添加机器人，复制 webhook URL（自动以 text 类型推送） |
+
+通知内容示例：
+
+```
+🔔 监控到博主更新！
+博主主页：WATCH_URLS 配置的主页
+本期新增：3 个作品（3 个文件）
+📥 下载直链（公开，不过期）：
+https://github.com/<owner>/<repo>/releases/download/watch-<N>/media-new.zip
+```
+
+> 仓库若是公开仓库，Release 直链任何人可下载；私有仓库则需登录。
+> 想自己掌控通知时机：也可在仓库页面 `Watch → Custom → Releases` 订阅，GitHub 会在每次发 Release 时邮件通知你。
+
+
 ### 配额与限制
 
 | 项 | 免费额度 |

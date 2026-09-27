@@ -107,6 +107,10 @@ jobs:
       - name: 计算新增条目
         id: diff
         if: ${{ steps.prep.outputs.skip != 'true' }}
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          NOTIFY_WEBHOOK: ${{ secrets.NOTIFY_WEBHOOK }}
         run: |
           python - <<'PY'
           import json, os
@@ -147,6 +151,15 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               fh.write(f"new_count={len(new_keys)}\n")
               fh.write(f"file_count={len(picked)}\n")
+
+          # 探测是否配置了通知渠道（缺配置则 notify=none，后续通知步自动跳过）
+          if os.environ.get("TG_BOT_TOKEN") and os.environ.get("TG_CHAT_ID"):
+              notify = "telegram"
+          elif os.environ.get("NOTIFY_WEBHOOK"):
+              notify = "webhook"
+          else:
+              notify = "none"
+          fh.write(f"notify={notify}\n")
 
           lines = ["## 监控结果", ""]
           lines.append(f"- 历史已收录：{len(before)} 条")
@@ -196,3 +209,46 @@ jobs:
           path: media-new.zip
           retention-days: 30
           if-no-files-found: warn
+
+      - name: 发布 Release（公开直链，不过期）
+        if: ${{ steps.diff.outputs.new_count != '0' && hashFiles('media-new.zip') != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: watch-${{ github.run_number }}
+          name: "监控更新 #${{ github.run_number }}"
+          body_path: manifest.md
+          files: media-new.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 感知通知（博主有更新时）
+        if: ${{ steps.diff.outputs.new_count != '0' && steps.diff.outputs.notify != 'none' }}
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          NOTIFY_WEBHOOK: ${{ secrets.NOTIFY_WEBHOOK }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.run_number }}
+          NOTIFY: ${{ steps.diff.outputs.notify }}
+        run: |
+          DL="https://github.com/$REPO/releases/download/watch-$RUN/media-new.zip"
+          {
+            echo "🔔 监控到博主更新！"
+            echo ""
+            echo "博主主页：WATCH_URLS 配置的主页"
+            echo "本期新增：${{ steps.diff.outputs.new_count }} 个作品（${{ steps.diff.outputs.file_count }} 个文件）"
+            echo ""
+            echo "📥 下载直链（公开，不过期）："
+            echo "$DL"
+          } > notify.txt
+          if [ "$NOTIFY" = "telegram" ]; then
+            curl -fsS -X POST "https://api.telegram.org/bot$TG_BOT_TOKEN/sendMessage" \
+              --data-urlencode "chat_id=$TG_CHAT_ID" \
+              --data-urlencode "text=$(cat notify.txt)"
+            echo "Telegram 通知已发送"
+          elif [ "$NOTIFY" = "webhook" ]; then
+            curl -fsS -X POST "$NOTIFY_WEBHOOK" \
+              -H "Content-Type: application/json" \
+              -d "$(python3 -c "import json,sys;print(json.dumps({'msgtype':'text','text':{'content':sys.stdin.read()}}))" < notify.txt)"
+            echo "Webhook 通知已发送"
+          fi

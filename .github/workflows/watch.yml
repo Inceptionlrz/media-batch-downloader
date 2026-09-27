@@ -246,8 +246,15 @@ jobs:
               --data-urlencode "text=$(cat notify.txt)"
             echo "Telegram 通知已发送"
           elif [ "$NOTIFY" = "webhook" ]; then
-            curl -fsS -X POST "$NOTIFY_WEBHOOK" \
-              -H "Content-Type: application/json" \
-              -d "$(python3 -c "import json,sys;print(json.dumps({'msgtype':'text','text':{'content':sys.stdin.read()}}))" < notify.txt)"
-            echo "Webhook 通知已发送"
+            WH="$NOTIFY_WEBHOOK"
+            if printf '%s' "$WH" | grep -qi "feishu"; then
+              # 飞书自定义机器人：content.text
+              BODY=$(python3 -c "import json,sys;print(json.dumps({'msg_type':'text','content':{'text':sys.stdin.read()}}))" < notify.txt)
+              echo "飞书通知已发送"
+            else
+              # 企业微信机器人：text.content
+              BODY=$(python3 -c "import json,sys;print(json.dumps({'msgtype':'text','text':{'content':sys.stdin.read()}}))" < notify.txt)
+              echo "企业微信通知已发送"
+            fi
+            curl -fsS -X POST "$WH" -H "Content-Type: application/json" -d "$BODY"
           fi

@@ -1,0 +1,10 @@
+{
+  "name": "feishu-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Feishu -> GitHub Actions bridge for controlling the TikTok/Douyin watch task",
+  "scripts": {
+    "dev": "vercel dev"
+  }
+}

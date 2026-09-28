@@ -73,8 +73,21 @@ jobs:
           TIKTOK_COOKIE: ${{ secrets.TIKTOK_COOKIE }}
           INLINE_URLS: ${{ inputs.urls }}
           REPO_URLS: ${{ vars.WATCH_URLS }}
+          WATCH_PAUSED: ${{ vars.WATCH_PAUSED }}
           LIMIT: ${{ inputs.limit }}
         run: |
+          # 暂停标记：飞书 /pause 会置 WATCH_PAUSED=true，此处直接跳过整轮
+          if [ "${WATCH_PAUSED}" = "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::已暂停（WATCH_PAUSED=true），本次跳过"
+            {
+              echo "## 监控结果"
+              echo ""
+              echo "监控已暂停（WATCH_PAUSED=true）。在飞书发送 /resume 恢复。"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           # 注意：GitHub 默认 bash -eo pipefail，grep 无匹配返回 1 会直接终止 step，
           # 因此过滤空行一律用 awk（始终返回 0），绝不依赖 grep 的退出码。
           {

@@ -19,6 +19,11 @@ on:
         required: false
         default: "10"
         type: string
+      test_notify:
+        description: "调试用：即使没有新增也强制发一条感知通知（验证飞书/企微/Telegram 链路）"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -221,7 +226,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 感知通知（博主有更新时）
-        if: ${{ steps.diff.outputs.new_count != '0' && steps.diff.outputs.notify != 'none' }}
+        if: ${{ steps.diff.outputs.notify != 'none' && (steps.diff.outputs.new_count != '0' || inputs.test_notify) }}
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
@@ -229,9 +234,14 @@ jobs:
           REPO: ${{ github.repository }}
           RUN: ${{ github.run_number }}
           NOTIFY: ${{ steps.diff.outputs.notify }}
+          TEST_NOTIFY: ${{ inputs.test_notify }}
         run: |
           DL="https://github.com/$REPO/releases/download/watch-$RUN/media-new.zip"
           {
+            if [ "$TEST_NOTIFY" = "true" ]; then
+              echo "[飞书通知链路测试] 以下为强制触发的验证消息"
+              echo ""
+            fi
             echo "🔔 监控到博主更新！"
             echo ""
             echo "博主主页：WATCH_URLS 配置的主页"

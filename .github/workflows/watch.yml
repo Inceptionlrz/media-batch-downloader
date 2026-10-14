@@ -178,14 +178,31 @@ jobs:
                   notify = "none"
               fh.write(f"notify={notify}\n")
 
+          def bj(ts):
+              from datetime import datetime, timezone, timedelta
+              if not ts:
+                  return "未知"
+              d = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=8)))
+              return d.strftime("%Y-%m-%d %H:%M")
+
           lines = ["## 监控结果", ""]
           lines.append(f"- 历史已收录：{len(before)} 条")
           lines.append(f"- 本次新增：**{len(new_keys)}** 条 / {len(picked)} 个文件")
           lines.append("")
-          for p in picked[:40]:
-              lines.append(f"- `{p.relative_to(out).as_posix()}` "
-                           f"（{p.stat().st_size / 1024 / 1024:.2f} MB）")
-          if not picked:
+          if picked:
+              for k in new_keys[:40]:
+                  meta = after.get(k, {})
+                  ct = bj(meta.get("create_time"))
+                  desc = (meta.get("desc") or "").strip()[:40]
+                  files = meta.get("files", [])
+                  sz = sum((out / Path(f).name).stat().st_size for f in files
+                           if (out / Path(f).name).is_file()) / 1024 / 1024
+                  lines.append(f"- 发布 {ct} 北京 ｜ {desc or '未知标题'} ｜ {len(files)} 文件 {sz:.2f}MB")
+                  for f in files[:5]:
+                      p = out / Path(f).name
+                      if p.is_file():
+                          lines.append(f"    - `{p.relative_to(out).as_posix()}` （{p.stat().st_size/1024/1024:.2f}MB）")
+          else:
               lines.append("> 没有新作品，本次不产出任何文件。")
           Path("manifest.md").write_text("\n".join(lines), encoding="utf-8")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:

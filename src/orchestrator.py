@@ -49,6 +49,8 @@ class Index:
             "files": [str(f) for f in files],
             "engine": item.engine,
             "ts": int(time.time()),
+            # 博主发布时间（Unix 秒），manifest 会用它显示精确发布时间
+            "create_time": int(item.create_time) if item.create_time else None,
         }
 
     def flush(self) -> None:

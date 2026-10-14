@@ -13,18 +13,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from src.config import load_config  # noqa: E402
 from src.cookies import _from_browser, ensure_cookies, export_cookie_to_config  # noqa: E402
-from src.engines.f2_engine import F2Engine  # noqa: E402
-from src.engines.ytdlp_engine import YtdlpEngine  # noqa: E402
 from src.orchestrator import Orchestrator  # noqa: E402
 
 
 def build_engines(cfg):
+    """惰性导入引擎：单个引擎依赖缺失只降级该引擎，不中断整体流程。
+    （顶层无条件 import 会让缺失依赖在导入期就抛错，使下面的 try 形同虚设）"""
     engines = {}
     try:
+        from src.engines.ytdlp_engine import YtdlpEngine
         engines["ytdlp"] = YtdlpEngine(cfg)
     except Exception as exc:
         print(f"[警告] yt-dlp 引擎不可用: {exc}")
     try:
+        from src.engines.f2_engine import F2Engine
         engines["f2"] = F2Engine(cfg)
     except Exception as exc:
         print(f"[警告] f2 引擎不可用: {exc}")

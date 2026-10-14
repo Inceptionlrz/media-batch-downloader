@@ -119,8 +119,15 @@ jobs:
           cat -n links.txt
           set +e
           python dl.py -f links.txt -o output -n "$LIMIT" -j 3 2>&1 | tee dl.log
-          echo "dl.py 退出码 ${PIPESTATUS[0]}（0=全部成功 / 3=有失败项）"
+          DL_CODE=${PIPESTATUS[0]}
           set -e
+          echo "dl.py 退出码 ${DL_CODE}（0=全部成功 / 2=无可用引擎 / 3=有失败项）"
+          # 失败必须可见：非 0 退出码直接把本步置红。
+          # 之前只 echo 退出码，导致 dl.py 失败时 workflow 仍显示绿色成功、实际零产出。
+          if [ "${DL_CODE}" -ne 0 ]; then
+            echo "::error::dl.py 执行失败（退出码 ${DL_CODE}），详见上方日志"
+            exit 1
+          fi
 
       - name: 计算新增条目
         id: diff

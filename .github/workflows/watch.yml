@@ -189,19 +189,27 @@ jobs:
           lines.append(f"- 历史已收录：{len(before)} 条")
           lines.append(f"- 本次新增：**{len(new_keys)}** 条 / {len(picked)} 个文件")
           lines.append("")
+          # 文件可能落在 output/<platform>/<author>/ 子目录，需 rglob 建 basename->路径 映射兜底，
+          # 否则拼 out/文件名 找不到文件，大小会恒显示 0.00MB
+          bmap = {}
+          for p in out.rglob("*"):
+              if p.is_file() and p.name != ".dl_index.json":
+                  bmap.setdefault(p.name, p)
+
+          def resolve(f):
+              n = Path(f).name
+              return bmap.get(n) or (out / n if (out / n).is_file() else None)
+
           if picked:
               for k in new_keys[:40]:
                   meta = after.get(k, {})
                   ct = bj(meta.get("create_time"))
                   desc = (meta.get("desc") or "").strip()[:40]
-                  files = meta.get("files", [])
-                  sz = sum((out / Path(f).name).stat().st_size for f in files
-                           if (out / Path(f).name).is_file()) / 1024 / 1024
-                  lines.append(f"- 发布 {ct} 北京 ｜ {desc or '未知标题'} ｜ {len(files)} 文件 {sz:.2f}MB")
-                  for f in files[:5]:
-                      p = out / Path(f).name
-                      if p.is_file():
-                          lines.append(f"    - `{p.relative_to(out).as_posix()}` （{p.stat().st_size/1024/1024:.2f}MB）")
+                  paths = [rp for rp in (resolve(f) for f in meta.get("files", [])) if rp]
+                  sz = sum(rp.stat().st_size for rp in paths) / 1024 / 1024
+                  lines.append(f"- 发布 {ct} 北京 ｜ {desc or '未知标题'} ｜ {len(paths)} 文件 {sz:.2f}MB")
+                  for rp in paths[:5]:
+                      lines.append(f"    - `{rp.relative_to(out).as_posix()}` （{rp.stat().st_size/1024/1024:.2f}MB）")
           else:
               lines.append("> 没有新作品，本次不产出任何文件。")
           Path("manifest.md").write_text("\n".join(lines), encoding="utf-8")

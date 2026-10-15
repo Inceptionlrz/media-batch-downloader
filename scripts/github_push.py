@@ -90,7 +90,11 @@ def ensure_initialized() -> None:
 
 
 def git_out(*args: str) -> str:
-    return subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=True).stdout.strip()
+    # -c core.quotepath=false：否则中文路径会被转义成 \xxx，导致读不到文件
+    return subprocess.run(
+        ["git", "-c", "core.quotepath=false", *args],
+        cwd=str(ROOT), capture_output=True, text=True,
+    ).stdout.strip()
 
 
 def collect_delta(base_ref: str = "") -> tuple[str | None, list[tuple[str, bytes]], list[str]]:

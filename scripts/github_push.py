@@ -1,6 +1,8 @@
 """用 GitHub Git Data API 批量上传文件（git push 在本机卡死时的备用通道）。
 
-用法：python scripts/github_push.py "提交信息"
+用法：
+  python scripts/github_push.py "提交信息"               # 全量快照（覆盖远端为本地工作区）
+  python scripts/github_push.py --delta "提交信息"       # 只提交本地相对远端 head 的改动（推荐）
 """
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ import base64
 import json
 import os
 import pathlib
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -17,7 +20,8 @@ OWNER = "Inceptionlrz"
 REPO = "media-batch-downloader"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-EXCLUDE_DIRS = {".git", ".workbuddy", "output", "logs", "__pycache__", ".venv", "venv"}
+EXCLUDE_DIRS = {".git", ".workbuddy", "output", "logs", "__pycache__", ".venv", "venv",
+                "node_modules", ".vercel"}
 EXCLUDE_FILES = {"config.toml", ".dl_index.json"}
 EXCLUDE_SUFFIX = {".log", ".pyc", ".pyo"}
 EXCLUDE_PREFIX = {".wbapp_"}
@@ -85,8 +89,95 @@ def ensure_initialized() -> None:
     print("仓库已初始化")
 
 
+def git_out(*args: str) -> str:
+    return subprocess.run(["git", *args], cwd=str(ROOT), capture_output=True, text=True).stdout.strip()
+
+
+def collect_delta(base_ref: str = "") -> tuple[str | None, list[tuple[str, bytes]], list[str]]:
+    """相对某个基线的增量改动，返回 (远端 base_sha|None, [(路径, 内容)], [删除路径])。
+
+    base_ref 为空时用远端 main 的 head；若该 commit 本地不存在（用 API 提过之后常发生），
+    需要显式传 --base=<本地存在的 ref>。
+    """
+    ref = request("GET", f"/repos/{OWNER}/{REPO}/git/ref/heads/main")
+    if "object" not in ref:
+        raise SystemExit(f"读取远端 main 失败：{ref}")
+    remote_sha = ref["object"]["sha"]
+    base_ref = base_ref or remote_sha
+    status = git_out("diff", "--name-status", base_ref, "HEAD")
+    if not status and base_ref == remote_sha:
+        raise SystemExit(
+            f"diff 为空：远端 head {remote_sha[:8]} 在本地不存在（用 API 提交过？），"
+            f"请显式指定 --base=<本地存在的 ref>"
+        )
+    added, deleted = [], []
+    for line in status.splitlines():
+        if not line.strip():
+            continue
+        code, _, path = line.partition("\t")
+        path = path.strip()
+        if code.startswith("D"):
+            deleted.append(path)
+        else:
+            p = ROOT / path
+            if p.is_file():
+                added.append((path, p.read_bytes()))
+    return remote_sha, added, deleted
+
+
 def main() -> int:
-    message = sys.argv[1] if len(sys.argv) > 1 else "update"
+    args = sys.argv[1:]
+    delta = "--delta" in args
+    if delta:
+        args.remove("--delta")
+    message = args[0] if args else "update"
+
+    if delta:
+        base_ref = ""
+        for a in list(args):
+            if a.startswith("--base="):
+                base_ref = a.split("=", 1)[1]
+                args.remove(a)
+        base_sha, files, deleted = collect_delta(base_ref)
+        if not files and not deleted:
+            print("没有相对远端 head 的改动，跳过")
+            return 0
+        print(f"增量提交（远端基线 {base_sha[:8]}），{len(files)} 个文件：")
+        for name, _ in files:
+            print("  + ", name)
+        for name in deleted:
+            print("  - ", name)
+
+        base_commit = request("GET", f"/repos/{OWNER}/{REPO}/git/commits/{base_sha}")
+        base_tree = base_commit.get("tree", {}).get("sha")
+        tree = []
+        for name, data in files:
+            res = request("POST", f"/repos/{OWNER}/{REPO}/git/blobs",
+                          {"content": base64.b64encode(data).decode(), "encoding": "base64"})
+            if "__error" in res:
+                print(f"blob 失败 {name}: {res['__error']} {res['__msg']}")
+                return 1
+            tree.append({"path": name, "mode": "100644", "type": "blob", "sha": res["sha"]})
+        for name in deleted:
+            tree.append({"path": name, "mode": "100644", "type": "blob", "sha": None})
+        res = request("POST", f"/repos/{OWNER}/{REPO}/git/trees", {"base_tree": base_tree, "tree": tree})
+        if "__error" in res:
+            print("tree 失败:", res["__error"], res["__msg"])
+            return 1
+        tree_sha = res["sha"]
+        res = request("POST", f"/repos/{OWNER}/{REPO}/git/commits",
+                      {"message": message, "tree": tree_sha, "parents": [base_sha]})
+        if "__error" in res:
+            print("commit 失败:", res["__error"], res["__msg"])
+            return 1
+        commit_sha = res["sha"]
+        res = request("PATCH", f"/repos/{OWNER}/{REPO}/git/refs/heads/main", {"sha": commit_sha})
+        if "__error" in res:
+            print("ref 更新失败:", res["__error"], res["__msg"])
+            return 1
+        print(f"完成：https://github.com/{OWNER}/{REPO}/commit/{commit_sha[:8]}")
+        return 0
+
     ensure_initialized()
     files = collect_files()
     print(f"待上传 {len(files)} 个文件：")

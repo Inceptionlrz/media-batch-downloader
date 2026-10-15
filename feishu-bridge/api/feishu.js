@@ -705,6 +705,7 @@ export default async function handler(req, res) {
   };
 
   // 5) 关键：立刻应答（飞书 3 秒超时），指令执行与回执放到后台
+  if (state.lastEvent) state.lastEvent.ackMs = Date.now() - t0;
   const ack = { code: 0, accepted: true, cmd: cmd || "(空)" };
   res.status(200).json(ack);
 
@@ -736,7 +737,7 @@ export default async function handler(req, res) {
       const r = await sendReply(result, messageId);
       log(r.ok ? "info" : "error", "回执结果", { cmd, ok: r.ok, channel: r.channel, reason: r.reason || "", totalMs: Date.now() - t0 });
       if (state.lastEvent) {
-        state.lastEvent.ackMs = Date.now() - t0;
+        // ackMs 已在应答前写入；这里记录后台全部完成（含 GitHub 调用与回执）的耗时
         state.lastEvent.doneMs = Date.now() - t0;
         state.lastEvent.replyOk = r.ok;
         state.lastEvent.replyChannel = r.channel;

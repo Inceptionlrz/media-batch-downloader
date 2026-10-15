@@ -6,5 +6,8 @@
   "description": "Feishu -> GitHub Actions bridge for controlling the TikTok/Douyin watch task",
   "scripts": {
     "dev": "vercel dev"
+  },
+  "dependencies": {
+    "@vercel/functions": "^3.10.1"
   }
 }
